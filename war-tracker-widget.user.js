@@ -1,13 +1,15 @@
 // ==UserScript==
 // @name         Greater Sparta War Tracker Widget
 // @namespace    greater-sparta
-// @version      4.2
+// @version      4.3
 // @description  Works on PC (Tampermonkey) and mobile (TornPDA). Floating button you can drag anywhere, opens live enemy status with Attack + Call Hit buttons, plus a 24hr activity heat map. Talks to my own private backend so there's nothing sensitive sitting in this file. Just paste in your own API key and go.
 // @match        https://www.torn.com/*
 // @grant        GM_xmlhttpRequest
 // @connect      api.torn.com
 // @connect      script.google.com
 // @connect      script.googleusercontent.com
+// @updateURL    https://github.com/eball97/War-Faction-Tracker/raw/refs/heads/main/war-tracker-widget.user.js
+// @downloadURL  https://github.com/eball97/War-Faction-Tracker/raw/refs/heads/main/war-tracker-widget.user.js
 // ==/UserScript==
 
 (function () {
