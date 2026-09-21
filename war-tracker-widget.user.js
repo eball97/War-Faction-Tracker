@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Greater Sparta War Tracker Widget
 // @namespace    greater-sparta
-// @version      4.4
+// @version      4.5
 // @description  Works on PC (Tampermonkey) and mobile (TornPDA). Floating button you can drag anywhere, opens live enemy status with Attack + Call Hit buttons, plus a 24hr activity heat map. Talks to my own private backend so there's nothing sensitive sitting in this file. Just paste in your own API key and go.
 // @match        https://www.torn.com/*
 // @grant        GM_xmlhttpRequest
@@ -329,7 +329,12 @@
     dragStartY = p.y;
     startLeft = currentPos.left;
     startTop = currentPos.top;
-    if (e.cancelable) e.preventDefault();
+    // Deliberately NOT calling preventDefault() here. Doing so on every
+    // single touchstart — even a simple tap — can suppress the browser's
+    // synthetic "click" event that fires afterward, which is exactly
+    // what was blocking the panel from opening on a plain tap. Only
+    // dragMove() below calls preventDefault(), and only once real
+    // movement is confirmed.
   }
 
   function dragMove(e) {
