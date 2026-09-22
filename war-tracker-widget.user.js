@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Greater Sparta War Tracker Widget
 // @namespace    greater-sparta
-// @version      4.5
+// @version      4.6
 // @description  Works on PC (Tampermonkey) and mobile (TornPDA). Floating button you can drag anywhere, opens live enemy status with Attack + Call Hit buttons, plus a 24hr activity heat map. Talks to my own private backend so there's nothing sensitive sitting in this file. Just paste in your own API key and go.
 // @match        https://www.torn.com/*
 // @grant        GM_xmlhttpRequest
@@ -24,7 +24,7 @@
   // Note to self: only tested the PC side so far. If something breaks
   // on TornPDA specifically, start here — the PDA_httpGet response
   // might come back shaped slightly differently than I'm expecting.
-  function request(method, url, options) {
+  function rawRequest(method, url, options) {
     options = options || {};
     const headers = options.headers || {};
     const data = options.data || null;
@@ -60,6 +60,28 @@
     }
 
     return Promise.reject(new Error('No supported request API found on this platform.'));
+  }
+
+  // Google Apps Script Web Apps (my proxy URL) don't respond directly —
+  // they first send a redirect to a temporary script.googleusercontent.com
+  // URL that holds the real response. Normal browsers follow this
+  // automatically without you noticing, but not every platform's request
+  // function does. If that happens we'd get Google's redirect page back
+  // instead of real JSON, which shows up as "<!DOCTYPE... is not valid
+  // JSON". This catches that case, pulls the real URL out of the page,
+  // and quietly retries against it instead of failing.
+  function request(method, url, options) {
+    return rawRequest(method, url, options).then(function (response) {
+      const text = response.responseText || '';
+      if (text.trim().indexOf('<') === 0) {
+        const match = text.match(/https:\/\/script\.googleusercontent\.com[^"'\s<>]+/);
+        if (match) {
+          return rawRequest(method, match[0], options);
+        }
+        throw new Error('Got an unexpected page back instead of data \u2014 try again in a moment.');
+      }
+      return response;
+    });
   }
 
   // ---------- SAVED SETTINGS ----------
