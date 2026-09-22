@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Greater Sparta War Tracker Widget
 // @namespace    greater-sparta
-// @version      4.7
-// @description  Works on PC (Tampermonkey) and mobile (TornPDA). Floating button you can drag anywhere, opens live enemy status with Attack + Call Hit buttons, plus a 24hr activity heat map. Talks to my own private backend so there's nothing sensitive sitting in this file. Just paste in your own API key and go.
+// @version      5.0
+// @description  Works on PC (Tampermonkey) and mobile (TornPDA). Floating button you can drag anywhere, opens live enemy status with Attack + Call Hit buttons, a personal Saved Targets tab, plus a 24hr activity heat map. Talks to my own private backend so there's nothing sensitive sitting in this file. Just paste in your own API key and go.
 // @match        https://www.torn.com/*
 // @grant        GM_xmlhttpRequest
 // @connect      api.torn.com
@@ -251,6 +251,17 @@
     }
     .wt-call-btn:hover { background: #5c5c28; }
     .wt-call-btn:disabled { opacity: 0.5; cursor: default; }
+    .wt-save-btn {
+      background: #17171a;
+      color: #8a877e;
+      border: 1px solid #2a2a2d;
+      border-radius: 3px;
+      padding: 4px 8px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .wt-save-btn:hover { background: #22222a; }
+    .wt-save-btn.saved { color: #c9a227; border-color: #c9a227; }
     .wt-settings label {
       display: block;
       font-size: 11px;
@@ -292,6 +303,7 @@
   panel.innerHTML = `
     <div id="wt-tabs">
       <button data-tab="live" class="active">Live Status</button>
+      <button data-tab="targets">Targets</button>
       <button data-tab="peak">Heat Map</button>
       <button data-tab="settings">Settings</button>
     </div>
@@ -437,6 +449,8 @@
       renderSettings(body);
     } else if (tab === 'peak') {
       renderPeakHours(body);
+    } else if (tab === 'targets') {
+      renderTargets(body);
     } else {
       renderLiveStatus(body);
       startLiveStatusAutoRefresh();
@@ -480,6 +494,84 @@
     });
   }
 
+  // ---------- SAVED TARGETS ----------
+  // Personal per-member list, stored locally \u2014 not shared with anyone
+  // else, just your own quick reference for who you've identified as
+  // beatable.
+  function getSavedTargets() {
+    return storageGet('savedTargets', []);
+  }
+  function isTargetSaved(id) {
+    return getSavedTargets().some(function (t) { return String(t.id) === String(id); });
+  }
+  function saveTarget(id, name) {
+    const targets = getSavedTargets();
+    if (!targets.some(function (t) { return String(t.id) === String(id); })) {
+      targets.push({ id: id, name: name });
+      storageSet('savedTargets', targets);
+    }
+  }
+  function removeTarget(id) {
+    const targets = getSavedTargets().filter(function (t) { return String(t.id) !== String(id); });
+    storageSet('savedTargets', targets);
+  }
+
+  // Shared row builder \u2014 used by both Live Status (all members) and
+  // the Targets tab (filtered to just your saved list), so both stay in
+  // sync automatically instead of duplicating this markup twice.
+  function buildMemberRowHtml(m) {
+    const status = (m.last_action && m.last_action.status) || 'Offline';
+    const statusClass = status === 'Online' ? 'wt-status-online' : status === 'Idle' ? 'wt-status-idle' : 'wt-status-offline';
+    const relative = (m.last_action && m.last_action.relative) || '';
+    const stateDesc = (m.status && m.status.description) || '';
+    const saved = isTargetSaved(m.id);
+    return (
+      '<div class="wt-row">' +
+        '<div>' +
+          '<div class="wt-name">' + escapeHtml(m.name) + '</div>' +
+          '<div class="wt-sub"><span class="' + statusClass + '">' + status + '</span> \u00b7 ' + escapeHtml(relative) + ' \u00b7 ' + escapeHtml(stateDesc) + '</div>' +
+        '</div>' +
+        '<div style="display:flex; gap:6px;">' +
+          '<button class="wt-save-btn' + (saved ? ' saved' : '') + '" data-id="' + m.id + '" data-name="' + escapeHtml(m.name) + '">' + (saved ? '\u2605 Saved' : '\u2606 Save') + '</button>' +
+          '<button class="wt-call-btn" data-id="' + m.id + '" data-name="' + escapeHtml(m.name) + '">Call Hit</button>' +
+          '<button class="wt-attack-btn" data-id="' + m.id + '">Attack</button>' +
+        '</div>' +
+      '</div>'
+    );
+  }
+
+  // Wires up all three buttons for whatever rows are currently in body.
+  // onSaveToggle lets the caller customize what happens after a
+  // save/unsave (Live Status just refreshes the star; Targets removes
+  // the whole row since it no longer belongs on that list).
+  function attachRowHandlers(body, onSaveToggle) {
+    body.querySelectorAll('.wt-attack-btn').forEach(function (attackBtn) {
+      attackBtn.addEventListener('click', function () {
+        const id = attackBtn.dataset.id;
+        window.open('https://www.torn.com/page.php?sid=attack&user2ID=' + id, '_blank');
+      });
+    });
+
+    body.querySelectorAll('.wt-call-btn').forEach(function (callBtn) {
+      callBtn.addEventListener('click', function () {
+        callHit(callBtn.dataset.id, callBtn.dataset.name, callBtn);
+      });
+    });
+
+    body.querySelectorAll('.wt-save-btn').forEach(function (saveBtn) {
+      saveBtn.addEventListener('click', function () {
+        const id = saveBtn.dataset.id;
+        const name = saveBtn.dataset.name;
+        if (isTargetSaved(id)) {
+          removeTarget(id);
+        } else {
+          saveTarget(id, name);
+        }
+        onSaveToggle(id, saveBtn);
+      });
+    });
+  }
+
   function loadLiveStatus(body, key, factionId) {
     return request('GET', 'https://api.torn.com/v2/faction/' + factionId + '/members?key=' + key).then(function (response) {
       const data = JSON.parse(response.responseText);
@@ -497,39 +589,70 @@
         return a.name.localeCompare(b.name);
       });
 
-      body.innerHTML = members.map(function (m) {
-        const status = (m.last_action && m.last_action.status) || 'Offline';
-        const statusClass = status === 'Online' ? 'wt-status-online' : status === 'Idle' ? 'wt-status-idle' : 'wt-status-offline';
-        const relative = (m.last_action && m.last_action.relative) || '';
-        const stateDesc = (m.status && m.status.description) || '';
-        return (
-          '<div class="wt-row">' +
-            '<div>' +
-              '<div class="wt-name">' + escapeHtml(m.name) + '</div>' +
-              '<div class="wt-sub"><span class="' + statusClass + '">' + status + '</span> \u00b7 ' + escapeHtml(relative) + ' \u00b7 ' + escapeHtml(stateDesc) + '</div>' +
-            '</div>' +
-            '<div style="display:flex; gap:6px;">' +
-              '<button class="wt-call-btn" data-id="' + m.id + '" data-name="' + escapeHtml(m.name) + '">Call Hit</button>' +
-              '<button class="wt-attack-btn" data-id="' + m.id + '">Attack</button>' +
-            '</div>' +
-          '</div>'
-        );
-      }).join('');
+      body.innerHTML = members.map(buildMemberRowHtml).join('');
 
-      body.querySelectorAll('.wt-attack-btn').forEach(function (attackBtn) {
-        attackBtn.addEventListener('click', function () {
-          const id = attackBtn.dataset.id;
-          window.open('https://www.torn.com/page.php?sid=attack&user2ID=' + id, '_blank');
-        });
-      });
-
-      body.querySelectorAll('.wt-call-btn').forEach(function (callBtn) {
-        callBtn.addEventListener('click', function () {
-          callHit(callBtn.dataset.id, callBtn.dataset.name, callBtn);
-        });
+      attachRowHandlers(body, function (id, saveBtn) {
+        const saved = isTargetSaved(id);
+        saveBtn.classList.toggle('saved', saved);
+        saveBtn.textContent = saved ? '\u2605 Saved' : '\u2606 Save';
       });
     }).catch(function () {
       body.innerHTML = '<div class="wt-empty">Error loading data \u2014 check your API key and Faction ID.</div>';
+    });
+  }
+
+  function renderTargets(body) {
+    const key = getApiKey();
+    if (!key) {
+      body.innerHTML = '<div class="wt-empty">Set your API key in Settings first.</div>';
+      return;
+    }
+
+    const saved = getSavedTargets();
+    if (saved.length === 0) {
+      body.innerHTML = '<div class="wt-empty">No saved targets yet \u2014 click \u2606 Save next to anyone on the Live Status tab to add them here.</div>';
+      return;
+    }
+
+    body.innerHTML = '<div class="wt-empty">Loading...</div>';
+
+    fetchTargetFactionId().then(function (factionId) {
+      return request('GET', 'https://api.torn.com/v2/faction/' + factionId + '/members?key=' + key);
+    }).then(function (response) {
+      const data = JSON.parse(response.responseText);
+      const members = data.members || [];
+      const savedIds = saved.map(function (t) { return String(t.id); });
+      const filtered = members.filter(function (m) { return savedIds.indexOf(String(m.id)) !== -1; });
+
+      // A saved target might have left the enemy faction and no longer
+      // show up in the live roster \u2014 still list them (using the name
+      // we stored), just without live status, rather than silently
+      // dropping them.
+      const foundIds = filtered.map(function (m) { return String(m.id); });
+      const missing = saved.filter(function (t) { return foundIds.indexOf(String(t.id)) === -1; });
+
+      const rowsHtml = filtered.map(buildMemberRowHtml).join('') +
+        missing.map(function (t) {
+          return (
+            '<div class="wt-row">' +
+              '<div>' +
+                '<div class="wt-name">' + escapeHtml(t.name) + '</div>' +
+                '<div class="wt-sub">No longer in that faction</div>' +
+              '</div>' +
+              '<div style="display:flex; gap:6px;">' +
+                '<button class="wt-save-btn saved" data-id="' + t.id + '" data-name="' + escapeHtml(t.name) + '">\u2605 Saved</button>' +
+              '</div>' +
+            '</div>'
+          );
+        }).join('');
+
+      body.innerHTML = rowsHtml;
+
+      attachRowHandlers(body, function () {
+        renderTargets(body); // re-render so removed targets disappear immediately
+      });
+    }).catch(function () {
+      body.innerHTML = '<div class="wt-empty">Error loading data \u2014 check your API key.</div>';
     });
   }
 
