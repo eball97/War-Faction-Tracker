@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Greater Sparta War Tracker Widget
 // @namespace    greater-sparta
-// @version      4.6
+// @version      4.7
 // @description  Works on PC (Tampermonkey) and mobile (TornPDA). Floating button you can drag anywhere, opens live enemy status with Attack + Call Hit buttons, plus a 24hr activity heat map. Talks to my own private backend so there's nothing sensitive sitting in this file. Just paste in your own API key and go.
 // @match        https://www.torn.com/*
 // @grant        GM_xmlhttpRequest
@@ -388,12 +388,35 @@
   document.addEventListener('touchmove', dragMove, { passive: false });
   document.addEventListener('touchend', dragEnd);
 
+  // Live Status auto-refreshes once a minute while it's the tab you're
+  // actually looking at, and stops the second you switch away or close
+  // the panel — no point polling something you're not even viewing.
+  let liveStatusInterval = null;
+
+  function stopLiveStatusAutoRefresh() {
+    if (liveStatusInterval) {
+      clearInterval(liveStatusInterval);
+      liveStatusInterval = null;
+    }
+  }
+
+  function startLiveStatusAutoRefresh() {
+    stopLiveStatusAutoRefresh();
+    liveStatusInterval = setInterval(function () {
+      if (currentTab === 'live' && panel.classList.contains('open')) {
+        renderLiveStatus(document.getElementById('wt-body'));
+      }
+    }, 60000);
+  }
+
   btn.addEventListener('click', function () {
     if (dragMoved) return;
     panel.classList.toggle('open');
     if (panel.classList.contains('open')) {
       positionPanel(currentPos);
       renderTab(currentTab);
+    } else {
+      stopLiveStatusAutoRefresh();
     }
   });
 
@@ -403,6 +426,7 @@
       panel.querySelectorAll('#wt-tabs button').forEach(b => b.classList.remove('active'));
       tabBtn.classList.add('active');
       currentTab = tabBtn.dataset.tab;
+      if (currentTab !== 'live') stopLiveStatusAutoRefresh();
       renderTab(currentTab);
     });
   });
@@ -415,6 +439,7 @@
       renderPeakHours(body);
     } else {
       renderLiveStatus(body);
+      startLiveStatusAutoRefresh();
     }
   }
 
@@ -431,6 +456,7 @@
       storageSet('tornApiKeyWarTracker', document.getElementById('wt-key-input').value.trim());
       cachedMyName = null;
       renderLiveStatus(body);
+      startLiveStatusAutoRefresh();
       panel.querySelectorAll('#wt-tabs button').forEach(b => b.classList.remove('active'));
       panel.querySelector('[data-tab="live"]').classList.add('active');
       currentTab = 'live';
